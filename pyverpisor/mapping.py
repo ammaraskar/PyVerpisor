@@ -1,11 +1,18 @@
 import os
+import ctypes
+from ctypes import pythonapi
+
+
+pythonapi.PyMemoryView_FromMemory.argtypes = (
+    ctypes.c_void_p,
+    ctypes.c_ssize_t,
+    ctypes.c_int,
+)
+pythonapi.PyMemoryView_FromMemory.restype = ctypes.py_object
 
 
 # Separate implementations for windows and others.
 if os.name == "nt":
-    import ctypes
-    from ctypes import pythonapi
-
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
     MEM_COMMIT = 0x00001000
@@ -15,12 +22,6 @@ if os.name == "nt":
     VirtualAlloc = kernel32.VirtualAlloc
     VirtualAlloc.restype = ctypes.c_void_p
 
-    pythonapi.PyMemoryView_FromMemory.argtypes = (
-        ctypes.c_void_p,
-        ctypes.c_ssize_t,
-        ctypes.c_int,
-    )
-    pythonapi.PyMemoryView_FromMemory.restype = ctypes.py_object
 
     def map_executable_page(num_bytes):
         buf = VirtualAlloc(
@@ -43,16 +44,29 @@ if os.name == "nt":
         return memory_view, buf
 
 else:
-    import ctypes
     import mmap
+
+    libc = ctypes.CDLL("libc.so.6")
+
+    libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+    libc.mmap.restype = ctypes.c_void_p
 
     def map_executable_page(num_bytes):
         # Map anonymous page with rwx.
-        mem = mmap.mmap(
-            -1,
-            num_bytes,
-            prot=mmap.PROT_READ | mmap.PROT_WRITE | mmap.PROT_EXEC,
-            flags=mmap.MAP_ANON | mmap.MAP_PRIVATE,
+        buf = libc.mmap(
+            0, # addr
+            num_bytes, # size
+            mmap.PROT_READ | mmap.PROT_WRITE | mmap.PROT_EXEC,
+            mmap.MAP_ANON | mmap.MAP_PRIVATE,
+            -1, # fd
+            0 # offset
         )
 
-        return memoryview(mem), ctypes.c_void_p.from_buffer(mem).value
+        memory_view = pythonapi.PyMemoryView_FromMemory(
+            buf,
+            num_bytes,
+            # memory view flags = rw
+            0x200,
+        )
+
+        return memory_view, buf
