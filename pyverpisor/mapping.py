@@ -55,4 +55,4 @@ else:
             flags=mmap.MAP_ANON | mmap.MAP_PRIVATE,
         )
 
-        return memoryview(map), ctypes.c_void_p.from_buffer(mem)
+        return memoryview(mem), ctypes.c_void_p.from_buffer(mem)
